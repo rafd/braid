@@ -1,4 +1,4 @@
-(ns braid.client.calls.subscriptions
+(ns braid.client.calls.subs
   (:require [reagent.ratom :include-macros true :refer-macros [reaction]]
             [re-frame.core :refer [subscribe reg-sub-raw]]
             [braid.client.state.subscription :refer [subscription]]))

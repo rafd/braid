@@ -1,4 +1,4 @@
-(ns braid.client.calls.handlers
+(ns braid.client.calls.events
   (:require [braid.client.webrtc :as rtc]
             [re-frame.core :refer [dispatch reg-event-db]]
             [braid.client.sync :as sync]
