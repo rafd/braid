@@ -1,5 +1,5 @@
 (ns braid.client.ui.views.main
-  (:require [braid.client.state :refer [subscribe]]
+  (:require [re-frame.core :refer [subscribe]]
             [braid.client.routes :as routes]
             [braid.client.ui.views.error-banner :refer [error-banner-view]]
             [braid.client.ui.views.sidebar :refer [sidebar-view]]
@@ -7,7 +7,6 @@
             [braid.client.calls.views :refer [call-view]]
             [braid.client.ui.views.pages.inbox :refer [inbox-page-view]]
             [braid.client.ui.views.pages.recent :refer [recent-page-view]]
-            [braid.client.ui.views.pages.users :refer [users-page-view]]
             [braid.client.ui.views.pages.search :refer [search-page-view]]
             [braid.client.ui.views.pages.tags :refer [tags-page-view]]
             [braid.client.ui.views.pages.me :refer [me-page-view]]
@@ -26,7 +25,6 @@
       (case (@page :type)
         :inbox [inbox-page-view]
         :recent [recent-page-view]
-        :users [users-page-view]
         :search [search-page-view]
         :tags [tags-page-view]
         :me [me-page-view]
@@ -38,6 +36,11 @@
         :settings [group-settings-view]
         :global-settings [global-settings-page-view]
         :changelog [changelog-view]
+        :index (do (when-let [group-id (-> @(subscribe [:ordered-groups])
+                                           first
+                                           :id)]
+                     (routes/go-to! (routes/inbox-page-path {:group-id group-id})))
+                   [:h1 "Redirecting..."])
         (do (routes/go-to! (routes/index-path))
             [:h1 "???"])))))
 
