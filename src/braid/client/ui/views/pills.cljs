@@ -76,9 +76,9 @@
                  (not= @caller-id callee-id))
         [:a.button {:on-click
                     (fn [_]
-                      (dispatch! :calls/start-new-call {:type :audio
+                      (dispatch [:calls/start-new-call {:type :audio
                                                         :caller-id @caller-id
-                                                        :callee-id callee-id}))}
+                                                        :callee-id callee-id}]))}
          "Call"]))))
 
 (defn user-pill
