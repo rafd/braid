@@ -1,6 +1,5 @@
 (ns braid.client.webrtc
-  (:require [braid.client.sync :as sync]
-            [braid.client.dispatcher :refer [dispatch!]]))
+  (:require [braid.client.sync :as sync]))
 
 (defonce svga-dimensions
   (clj->js {:mandatory {:maxWidth 320 :maxHeight 180}}))

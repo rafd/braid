@@ -3,15 +3,14 @@
             [reagent.ratom :include-macros true :refer-macros [reaction]]
             [braid.client.ui.views.pills :refer [user-pill-view]]
             [braid.client.webrtc :as rtc]
-            [braid.client.dispatcher :refer [dispatch!]]
-            [braid.client.state :refer [subscribe]]))
+            [re-frame.core :refer [dispatch subscribe]]))
 
 (defn ended-call-view
   [call]
   (let [correct-nickname (subscribe [:correct-nickname call])]
     (fn [call]
       [:div
-        [:a.button {:on-click (fn [_] (dispatch! :calls/set-requester-call-status [call :archived]))} "X"]
+        [:a.button {:on-click (fn [_] (dispatch [:calls/set-requester-call-status [call :archived]]))} "X"]
         [:p (str "Call with " @correct-nickname " ended")]])))
 
 (defn dropped-call-view
@@ -19,7 +18,7 @@
   (let [correct-nickname (subscribe [:correct-nickname call])]
     (fn [call]
       [:div
-        [:a.button {:on-click (fn [_] (dispatch! :calls/set-requester-call-status [call :archived]))} "X"]
+        [:a.button {:on-click (fn [_] (dispatch [:calls/set-requester-call-status [call :archived]]))} "X"]
         [:p (str "Call with " @correct-nickname " dropped")]])))
 
 (defn declined-call-view
@@ -29,7 +28,7 @@
         callee-nickname (subscribe [:nickname (call :callee-id)])]
     (fn [call]
       [:div
-        [:a.button {:on-click (fn [_] (dispatch! :calls/set-requester-call-status [call :archived]))} "X"]
+        [:a.button {:on-click (fn [_] (dispatch [:calls/set-requester-call-status [call :archived]]))} "X"]
         (if @user-is-caller?
           [:p (str @callee-nickname " declined your call")]
           [:p (str "Call with " @caller-nickname "declined")])])))
@@ -51,7 +50,7 @@
                 :class (if (= (call :type) :video) "video" "audio")}]
        [:a.button {:on-click
                     (fn [_]
-                      (dispatch! :calls/set-requester-call-status [call :ended]))} "End"]])))
+                      (dispatch [:calls/set-requester-call-status [call :ended]]))} "End"]])))
 
 (defn incoming-call-view
   [call]
@@ -64,35 +63,25 @@
            [:p (str "Calling " @callee-nickname "...")]
            [:a.button {:on-click
                         (fn [_]
-                          (dispatch! :calls/set-requester-call-status [call :dropped]))} "Drop"]]
+                          (dispatch [:calls/set-requester-call-status [call :dropped]]))} "Drop"]]
         [:div
            [:p (str "Call from " @caller-nickname)]
            [:a.button {:on-click
                         (fn [_]
-                          (dispatch! :calls/set-requester-call-status [call :accepted]))} "Accept"]
+                          (dispatch [:calls/set-requester-call-status [call :accepted]]))} "Accept"]
            [:a.button {:on-click
                         (fn [_]
-                          (dispatch! :calls/set-requester-call-status [call :declined]))} "Decline"]]))))
+                          (dispatch [:calls/set-requester-call-status [call :declined]]))} "Decline"]]))))
 
 (defn during-call-view
   [call]
-  (let [call-atom (r/atom call)
-        call-status (subscribe [:call-status] [call-atom])
-        correct-nickname (subscribe [:correct-nickname] [call-atom])]
-    (r/create-class
-      {:display-name "during-call-view"
-       :component-will-receive-props
-       (fn [_ [_ new-call]]
-         (reset! call-atom new-call))
-       :reagent-render
-       (fn [call]
-         [:div.call
-           (case @call-status
-             :incoming [incoming-call-view call]
-             :accepted [accepted-call-view call]
-             :declined [declined-call-view call]
-             :dropped [dropped-call-view call]
-             :ended [ended-call-view call])])})))
+  [:div.call
+   (case (call :status)
+     :incoming [incoming-call-view call]
+     :accepted [accepted-call-view call]
+     :declined [declined-call-view call]
+     :dropped [dropped-call-view call]
+     :ended [ended-call-view call])])
 
 (defn call-view []
   (let [new-call (subscribe [:new-call])]
