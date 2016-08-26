@@ -55,17 +55,17 @@
 (defn incoming-call-view
   [call]
   (let [user-is-caller? (subscribe [:current-user-is-caller? (call :caller-id)])
-        caller-nickname (subscribe [:nickname (call :caller-id)])
-        callee-nickname (subscribe [:nickname (call :callee-id)])]
+        caller (subscribe [:user (call :caller-id)])
+        callee (subscribe [:user (call :callee-id)])]
     (fn [call]
       (if @user-is-caller?
         [:div
-           [:p (str "Calling " @callee-nickname "...")]
+           [:p (str "Calling " (@callee :nickname)"...")]
            [:a.button {:on-click
                         (fn [_]
                           (dispatch [:calls/set-requester-call-status [call :dropped]]))} "Drop"]]
         [:div
-           [:p (str "Call from " @caller-nickname)]
+           [:p (str "Call from " (@caller :nickname))]
            [:a.button {:on-click
                         (fn [_]
                           (dispatch [:calls/set-requester-call-status [call :accepted]]))} "Accept"]
