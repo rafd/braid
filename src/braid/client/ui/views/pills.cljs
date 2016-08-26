@@ -81,6 +81,18 @@
                                                         :callee-id callee-id}]))}
          "Call"]))))
 
+(defn make-admin-button-view
+  [user-id]
+  (let [open-group-id (subscribe [:open-group-id])
+        admin? (subscribe [:user-is-group-admin? user-id] [open-group-id])
+        viewer-admin? (subscribe [:current-user-is-group-admin?] [open-group-id])]
+    (fn [user-id]
+      (when (and @viewer-admin? (not @admin?))
+        [:a.button
+         {:on-click (fn [_] (dispatch [:make-admin {:group-id @open-group-id
+                                                    :user-id user-id}]))}
+         "Make Admin"]))))
+
 (defn user-pill
   [user-id]
   (let [user (subscribe [:user user-id])]
@@ -99,8 +111,7 @@
         open-group-id (subscribe [:open-group-id])
         user-status (subscribe [:user-status user-id])
         current-user-id (subscribe [:user-id])
-        admin? (subscribe [:user-is-group-admin? user-id] [open-group-id])
-        viewer-admin? (subscribe [:current-user-is-group-admin?] [open-group-id])]
+        admin? (subscribe [:user-is-group-admin? user-id] [open-group-id])]
     (fn [user-id]
       [:div.card
        [:div.header {:style {:background-color (id->color user-id)}}
@@ -123,12 +134,7 @@
         ; [:a.mute "Mute"]
         [search-button-view (str "@" (@user :nickname))]
         [call-button-view user-id]
-        (when (and @viewer-admin? (not @admin?))
-          ; TODO: make this not ugly
-          [:button.make-admin
-           {:on-click (fn [_] (dispatch [:make-admin {:group-id @open-group-id
-                                                      :user-id user-id}]))}
-           "Make Admin"])]])))
+        [make-admin-button-view user-id]]])))
 
 (defn user-pill-view
   [user-id]
