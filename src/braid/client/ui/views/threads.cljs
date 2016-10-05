@@ -10,24 +10,26 @@
         this-elt (r/atom nil)
         reset-threads! (fn [new-threads]
                          (reset! threads (vec new-threads)))
-        update-threads! (fn [new-threads]
-                          (swap! threads
-                                 (fn [old-threads]
-                                   (let [old-thread-ids (set (map :id old-threads))
-                                         new-thread-ids (set (map :id new-threads))
-                                         to-remove (difference old-thread-ids new-thread-ids)
-                                         to-add (difference new-thread-ids old-thread-ids)
-                                         ordered-ids (concat (remove to-remove old-thread-ids)
-                                                             (filter to-add new-thread-ids))]
-                                     (mapv (comp first (group-by :id new-threads)) ordered-ids)))))
-        scroll-horizontally (fn [e]
-                              (let [target-classes (.. e -target -classList)]
-                                ; TODO: check if threads-div needs to scroll?
-                                (when (and (or (.contains target-classes "thread")
-                                               (.contains target-classes "threads"))
-                                        (= 0 (.-deltaX e) (.-deltaZ e)))
-                                  (set! (.-scrollLeft @this-elt)
-                                        (- (.-scrollLeft @this-elt) (.-deltaY e))))))]
+        update-threads!
+        (fn [new-threads]
+          (swap! threads
+                 (fn [old-threads]
+                   (let [old-thread-ids (set (map :id old-threads))
+                         new-thread-ids (set (map :id new-threads))
+                         to-remove (difference old-thread-ids new-thread-ids)
+                         to-add (difference new-thread-ids old-thread-ids)
+                         ordered-ids (concat (remove to-remove old-thread-ids)
+                                             (filter to-add new-thread-ids))]
+                     (mapv (comp first (group-by :id new-threads)) ordered-ids)))))
+        scroll-horizontally
+        (fn [e]
+          (let [target-classes (.. e -target -classList)]
+            ; TODO: check if threads-div needs to scroll?
+            (when (and (or (.contains target-classes "thread")
+                           (.contains target-classes "threads"))
+                    (= 0 (.-deltaX e) (.-deltaZ e)))
+              (set! (.-scrollLeft @this-elt)
+                    (- (.-scrollLeft @this-elt) (.-deltaY e))))))]
     (r/create-class
       {:display-name "threads-view"
 
@@ -43,15 +45,15 @@
            (update-threads! (next-props :threads))))
 
        :reagent-render
-       (fn [{:keys [new-thread-args
+       (fn [{:keys [show-new-thread?
                     threads-opts]
              :or {threads-opts {}}}]
          [:div.threads
           (merge threads-opts
                  {:on-wheel scroll-horizontally})
 
-          (when new-thread-args
-            [new-thread-view new-thread-args])
+          (when show-new-thread?
+            [new-thread-view])
 
           (doall
             (for [thread @threads]

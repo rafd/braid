@@ -1,13 +1,11 @@
 (ns braid.client.ui.views.message
   (:require [reagent.core :as r]
             [clojure.string :as string]
-            [braid.client.store :as store]
+            [re-frame.core :refer [dispatch subscribe]]
             [braid.client.helpers :as helpers :refer [id->color ->color]]
-            [braid.client.state :refer [subscribe]]
             [braid.client.ui.views.embed :refer [embed-view]]
             [braid.client.ui.views.pills :refer [tag-pill-view user-pill-view]]
             [braid.client.emoji :as emoji]
-            [braid.client.dispatcher :refer [dispatch!]]
             [braid.client.routes :as routes]))
 
 (defn abridged-url
@@ -23,31 +21,35 @@
               abridged-path (apply str (take-last path-char-limit path))]
           (str domain gap abridged-path))))))
 
+(defn link-pill-view [url]
+  [:a.external {:href url
+                :title url
+                :style {:background-color (helpers/url->color url)
+                        :border-color (helpers/url->color url)}
+                :on-click (fn [e] (.stopPropagation e))
+                :target "_blank"
+                ; rel to address vuln caused by target=_blank
+                ; https://www.jitbit.com/alexblog/256-targetblank---the-most-underestimated-vulnerability-ever/
+                :rel "noopener noreferrer"
+                :tabIndex -1}
+   (abridged-url url)])
+
 (def replacements
   {:urls
    {:pattern helpers/url-re
     :replace (fn [url]
-               [:a.external {:href url
-                             :title url
-                             :style {:background-color (helpers/url->color url)}
-                             :on-click (fn [e] (.stopPropagation e))
-                             :target "_blank"
-                             ; rel to address vuln caused by target=_blank
-                             ; https://www.jitbit.com/alexblog/256-targetblank---the-most-underestimated-vulnerability-ever/
-                             :rel "noopener noreferrer"
-                             :tabIndex -1}
-                (abridged-url url)])}
+               [link-pill-view url])}
    :users
    {:pattern #"@([-0-9a-z]+)"
     :replace (fn [match]
                ;TODO: Subscribe to valid user id
-               (if (store/valid-user-id? (uuid match))
+               (if (some? @(subscribe [:user (uuid match)]))
                  [user-pill-view (uuid match)]
                  [:span "@" match]))}
    :tags
    {:pattern #"#([-0-9a-z]+)"
     :replace (fn [match]
-               (if (store/get-tag (uuid match))
+               (if (some? @(subscribe [:tag (uuid match)]))
                  [tag-pill-view (uuid match)]
                  [:span "#" match]))}
    :emoji-shortcodes
@@ -182,7 +184,8 @@
          rest)))
 
 (defn message-view [message embed-update-chan]
-  (let [sender (subscribe [:user (message :user-id)])]
+  (let [sender (subscribe [:user (message :user-id)])
+        current-group (subscribe [:open-group-id])]
     (r/create-class
       {:component-did-mount
        (fn []
@@ -194,9 +197,9 @@
        :reagent-render
        (fn [message embed-update-chan]
          (let [sender-path (if (@sender :bot?)
-                             (routes/bots-path {:group-id (routes/current-group)})
-                             (routes/user-page-path {:group-id (routes/current-group)
-                                                     :user-id (@sender :id)}))]
+                             (routes/bots-path {:group-id @current-group})
+                             (routes/search-page-path {:group-id @current-group
+                                                       :query (str "@" (@sender :nickname))}))]
            [:div.message {:class (str " " (when (:collapse? message) "collapse")
                                       " " (if (:unseen? message) "unseen" "seen")
                                       " " (when (:first-unseen? message) "first-unseen")
@@ -205,7 +208,7 @@
               [:div.error
                [:span "Message failed to send"]
                [:button {:on-click
-                         (fn [_] (dispatch! :resend-message message))}
+                         (fn [_] (dispatch [:resend-message message]))}
                 "Resend"]])
             [:a.avatar {:href sender-path
                         :tabIndex -1}

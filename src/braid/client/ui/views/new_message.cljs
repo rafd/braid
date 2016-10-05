@@ -2,9 +2,8 @@
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [reagent.core :as r]
             [reagent.ratom :refer-macros [run!]]
-            [braid.client.state :refer [subscribe]]
+            [re-frame.core :refer [dispatch subscribe]]
             [cljs.core.async :as async :refer [<! put! chan alts!]]
-            [braid.client.dispatcher :refer [dispatch!]]
             [braid.client.store :as store]
             [braid.client.s3 :as s3]
             [braid.client.helpers :refer [debounce stop-event!]]
@@ -22,11 +21,11 @@
         focused? (subscribe [:thread-focused? (config :thread-id)])
         send-message!
         (fn [config text]
-          (dispatch! :new-message {:thread-id (config :thread-id)
+          (dispatch [:new-message {:thread-id (config :thread-id)
                                    :group-id (config :group-id)
                                    :content text
                                    :mentioned-user-ids (config :mentioned-user-ids)
-                                   :mentioned-tag-ids (config :mentioned-tag-ids)}))
+                                   :mentioned-tag-ids (config :mentioned-tag-ids)}]))
         _ (run! (do
                   (when (and @focused? @this-elt)
                     (.focus @this-elt))))]
@@ -48,7 +47,7 @@
                      :value text
                      :disabled (not @connected?)
                      :on-focus (fn [e]
-                                 (dispatch! :focus-thread (config :thread-id)))
+                                 (dispatch [:focus-thread (config :thread-id)]))
                      :on-change (on-change
                                   {:on-change
                                    (fn [e]
@@ -87,11 +86,13 @@
         thread-text-kill-chan (chan)
         thread-text-chan (chan)
         throttled-thread-text-chan (debounce thread-text-chan 500)
-        thread-id (r/atom (config :thread-id))
-        thread-text (subscribe [:thread-new-message] [thread-id])
+        ; safe to close over thread-id
+        thread-id (config :thread-id)
+        ; safe to close over new-message
+        thread-text (config :new-message)
 
-        ; delibrately closing over value of sub
-        state (r/atom {:text @thread-text
+        ; deliberately closing over value of sub
+        state (r/atom {:text thread-text
                        :force-close? false
                        :highlighted-result-index 0
                        :results nil})
@@ -134,17 +135,18 @@
         clear-force-close! (fn []
                              (swap! state assoc :force-close? false))
 
-        update-thread-text! (fn [thread-id text] (put! thread-text-chan
-                                                       {:thread-id thread-id
-                                                        :content text}))
+        update-thread-text! (fn [thread-id text]
+                              (put! thread-text-chan
+                                    {:thread-id thread-id
+                                     :content text}))
         set-text! (fn [text]
                     (let [text (.slice text 0 5000)]
                       (swap! state assoc :text text)
-                      (update-thread-text! @thread-id text)))
+                      (update-thread-text! thread-id text)))
 
         update-text! (fn [f]
                        (swap! state update :text f)
-                       (update-thread-text! @thread-id (@state :text)))
+                       (update-thread-text! thread-id (@state :text)))
 
         choose-result!
         (fn [result]
@@ -204,7 +206,6 @@
       {:display-name "autocomplete"
        :component-will-mount
        (fn [c]
-         (swap! state assoc :text @thread-text)
          (let [config (r/props c)]
            (go (loop []
                  (let [[text ch] (alts! [throttled-autocomplete-chan kill-chan])]
@@ -219,14 +220,11 @@
                                       thread-text-kill-chan])]
                    (if (= ch throttled-thread-text-chan)
                      (do
-                       (dispatch! :new-message-text v)
+                       (dispatch [:new-message-text (merge v {:group-id (config :group-id)}) v])
                        (recur))
-                     (dispatch! :new-message-text {:thread-id @thread-id
-                                                   :content (@state :text)})))))))
-
-       :component-will-update
-       (fn [c [_ new-config]]
-         (reset! thread-id (new-config :thread-id)))
+                     (dispatch [:new-message-text {:group-id (config :group-id)
+                                                   :thread-id thread-id
+                                                   :content (@state :text)}])))))))
 
        :component-will-unmount
        (fn []
@@ -269,10 +267,10 @@
                                (aget (.. e -target -files) 0)
                                (fn [url]
                                  (reset! uploading? false)
-                                 (dispatch! :create-upload
+                                 (dispatch [:create-upload
                                             {:url url
                                              :group-id (config :group-id)
-                                             :thread-id (config :thread-id)}))))}]])))
+                                             :thread-id (config :thread-id)}]))))}]])))
 
 (defn new-message-view [config]
   [:div.message.new

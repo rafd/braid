@@ -1,11 +1,5 @@
 (ns braid.server.sync
-  (:require [mount.core :as mount :refer [defstate]]
-            [taoensso.sente :as sente]
-            [taoensso.sente.server-adapters.http-kit :refer [get-sch-adapter]]
-            [taoensso.sente.packers.transit :as sente-transit]
-            [compojure.core :refer [GET POST routes defroutes context]]
-            [ring.middleware.anti-forgery :refer [*anti-forgery-token*]]
-            [taoensso.timbre :as timbre :refer [debugf]]
+  (:require [taoensso.timbre :as timbre :refer [debugf]]
             [taoensso.truss :refer [have]]
             [clojure.string :as string]
             [braid.server.db :as db]
@@ -20,68 +14,30 @@
             [braid.server.message-format :refer [parse-tags-and-mentions]]
             [braid.server.bots :as bots]
             [braid.server.db.common :refer [bot->display]]
-            [braid.server.util :refer [valid-url?]]))
-
-(let [packer (sente-transit/get-transit-packer :json)
-      {:keys [ch-recv send-fn ajax-post-fn ajax-get-or-ws-handshake-fn
-              connected-uids]}
-      (sente/make-channel-socket! (get-sch-adapter)
-                                  {:user-id-fn
-                                   (fn [ob] (get-in ob [:session :user-id]))
-                                   :packer packer})]
-  (def ring-ajax-post                ajax-post-fn)
-  (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
-  (def ch-chsk                       ch-recv)
-  (def chsk-send!                    send-fn)
-  (def connected-uids                connected-uids))
-
-(defroutes sync-routes
-  (GET  "/chsk" req
-      (-> req
-          (assoc-in [:session :ring.middleware.anti-forgery/anti-forgery-token]
-            *anti-forgery-token*)
-          ring-ajax-get-or-ws-handshake))
-  (POST "/chsk" req (ring-ajax-post req)))
-
-(defmulti event-msg-handler :id)
-
-(defn event-msg-handler* [{:as ev-msg :keys [id ?data event]}]
-  (when-not (= event [:chsk/ws-ping])
-    (debugf "User: %s Event: %s" (get-in ev-msg [:ring-req :session :user-id]) event))
-  (when-let [user-id (get-in ev-msg [:ring-req :session :user-id])]
-    (event-msg-handler (assoc ev-msg :user-id user-id))))
-
-(defstate router
-  :start (sente/start-chsk-router! ch-chsk event-msg-handler*)
-  :stop (router))
-
-(defmethod event-msg-handler :default
-  [{:as ev-msg :keys [event id ?data ring-req ?reply-fn send-fn user-id]}]
-  (let [session (:session ring-req)
-        uid     (:uid     session)]
-    (debugf "Unhandled event: %s" event)
-    (when ?reply-fn
-      (?reply-fn {:umatched-event-as-echoed-from-from-server event}))))
+            [braid.server.util :refer [valid-url?]]
+            [braid.server.sync-handler :refer [event-msg-handler]]
+            [braid.server.quests.sync]
+            [braid.server.socket :refer [chsk-send!
+                                         connected-uids]]))
 
 ;; Handler helpers
 
 (defn broadcast-thread
-  "broadcasts thread to all subscribed users, except those in ids-to-skip"
+  "broadcasts thread to all users with the thread open, except those in ids-to-skip"
   [thread-id ids-to-skip]
-  (let [subscribed-user-ids (db/users-subscribed-to-thread thread-id)
-          user-ids-to-send-to (-> (difference
-                                    (intersection
-                                      (set subscribed-user-ids)
-                                      (set (:any @connected-uids)))
-                                    (set ids-to-skip)))
-          thread (db/thread-by-id thread-id)]
-      (doseq [uid user-ids-to-send-to]
-        (let [user-tags (db/tag-ids-for-user uid)
-              filtered-thread (update-in thread [:tag-ids]
-                                         (partial into #{} (filter user-tags)))
-              thread-with-last-opens (db/thread-add-last-open-at
-                                       filtered-thread uid)]
-          (chsk-send! uid [:braid.client/thread thread-with-last-opens])))))
+  (let [user-ids (-> (difference
+                       (intersection
+                         (set (db/users-with-thread-open thread-id))
+                         (set (:any @connected-uids)))
+                       (set ids-to-skip)))
+        thread (db/thread-by-id thread-id)]
+    (doseq [uid user-ids]
+      (let [user-tags (db/tag-ids-for-user uid)
+            filtered-thread (update-in thread [:tag-ids]
+                                       (partial into #{} (filter user-tags)))
+            thread-with-last-opens (db/thread-add-last-open-at
+                                     filtered-thread uid)]
+        (chsk-send! uid [:braid.client/thread thread-with-last-opens])))))
 
 (defn broadcast-user-change
   "Broadcast user info change to clients that can see this user"
@@ -232,6 +188,15 @@
         (when-let [cb ?reply-fn]
           (cb :braid/error))))))
 
+(defmethod event-msg-handler :braid.server/tag-thread
+  [{:as ev-msg :keys [?data user-id]}]
+  (let [{:keys [thread-id tag-id]} ?data]
+    (let [group-id (db/tag-group-id tag-id)]
+      (db/tag-thread! group-id thread-id tag-id)
+      (broadcast-thread thread-id []))
+    ; TODO do we need to notify-users and notify-bots
+    ))
+
 (defmethod event-msg-handler :braid.server/subscribe-to-tag
   [{:as ev-msg :keys [?data user-id]}]
   (db/user-subscribe-to-tag! user-id ?data))
@@ -381,18 +346,6 @@
         threads (map filter-tags (db/threads-by-id thread-ids))]
     (when ?reply-fn
       (?reply-fn {:threads threads}))))
-
-(defmethod event-msg-handler :braid.server/threads-for-tag
-  [{:as ev-msg :keys [?data ?reply-fn user-id]}]
-  (let [user-tags (db/tag-ids-for-user user-id)
-        filter-tags (fn [t] (update-in t [:tag-ids]
-                                       (partial into #{} (filter user-tags))))
-        offset (get ?data :offset 0)
-        limit (get ?data :limit 50)
-        threads (-> (db/threads-with-tag user-id (?data :tag-id) offset limit)
-                    (update :threads (comp doall (partial map filter-tags))))]
-    (when ?reply-fn
-      (?reply-fn threads))))
 
 (defmethod event-msg-handler :braid.server/invite-to-group
   [{:as ev-msg :keys [?data user-id]}]
@@ -546,4 +499,5 @@
                              (if (connected (% :id)) :online :offline)))
                      (db/users-for-user user-id))
         :invitations (db/invites-for-user user-id)
-        :tags (db/tags-for-user user-id)}])))
+        :tags (db/tags-for-user user-id)
+        :quest-records (db/get-active-quests-for-user-id user-id)}])))

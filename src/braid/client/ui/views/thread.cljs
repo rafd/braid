@@ -1,11 +1,11 @@
 (ns braid.client.ui.views.thread
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [clojure.string :as string]
+            [clojure.set :refer [difference]]
             [reagent.core :as r]
-            [braid.client.state :refer [subscribe]]
+            [re-frame.core :refer [dispatch subscribe]]
             [cljs.core.async :refer [chan put!]]
             [braid.client.routes :as routes]
-            [braid.client.dispatcher :refer [dispatch!]]
             [braid.client.helpers :as helpers]
             [braid.client.s3 :as s3]
             [braid.client.ui.views.pills :refer [user-pill-view tag-pill-view]]
@@ -15,28 +15,54 @@
 
 (def max-file-size (* 10 1024 1024))
 
+(defn tag-option-view [tag thread-id close-list!]
+  [:div.tag-option
+   {:on-click (fn []
+                (close-list!)
+                (dispatch [:add-tag-to-thread {:thread-id thread-id
+                                               :tag-id (tag :id)}]))}
+   [:div.rect {:style {:background (helpers/->color (tag :id))}}]
+   [:span {:style {:color (helpers/->color (tag :id))}}
+    "#" (tag :name)]])
+
+(defn add-tag-list-view [thread close-list!]
+  (let [group-tags (subscribe [:open-group-tags])]
+    (fn [thread close-list!]
+      (let [thread-tag-ids (set (thread :tag-ids))
+            tags (->> @group-tags
+                      (remove (fn [tag]
+                                (contains? thread-tag-ids (tag :id))))
+                      (sort-by :name))]
+        [:div.tag-list
+         (if (seq tags)
+           (doall
+             (for [tag tags]
+               ^{:key (tag :id)}
+               [tag-option-view tag (thread :id) close-list!]))
+           [:div.name "All tags used already."])]))))
+
+(defn add-tag-button-view [thread]
+  (let [show-list? (r/atom false)
+        close-list! (fn []
+                      (reset! show-list? false))]
+    (fn [thread]
+      [:div.add
+       [:span.pill {:on-click (fn [] (swap! show-list? not))}
+        (if @show-list? "×" "+")]
+       (when @show-list?
+         [add-tag-list-view thread close-list!])])))
+
 (defn thread-tags-view [thread]
-  (let [thread-id (r/atom (thread :id))
-        tags (subscribe [:tags-for-thread] [thread-id])
-        mentions (subscribe [:mentions-for-thread] [thread-id])]
-    (r/create-class
-      {:display-name "thread-tags-view"
-
-       :component-will-update
-       (fn [c [_ new-thread]]
-         (reset! thread-id (new-thread :id)))
-
-       :reagent-render
-       (fn [thread]
-         [:div.tags
-          (doall
-            (for [user @mentions]
-              ^{:key (user :id)}
-              [user-pill-view (user :id)]))
-          (doall
-            (for [tag @tags]
-              ^{:key (tag :id)}
-              [tag-pill-view (tag :id)]))])})))
+  [:div.tags
+   (doall
+     (for [user-id (thread :mentioned-ids)]
+       ^{:key user-id}
+       [user-pill-view user-id]))
+   (doall
+     (for [tag-id (thread :tag-ids)]
+       ^{:key tag-id}
+       [tag-pill-view tag-id]))
+   [add-tag-button-view thread]])
 
 (defn messages-view [thread]
   ; Closing over thread-id, but the only time a thread's id changes is the new
@@ -125,14 +151,14 @@
         maybe-upload-file!
         (fn [thread file]
           (if (> (.-size file) max-file-size)
-            (dispatch! :display-error [:upload-fail "File to big to upload, sorry"])
+            (dispatch [:display-error [:upload-fail "File to big to upload, sorry"]])
             (do (set-uploading! true)
                 (s3/upload file (fn [url]
                                   (set-uploading! false)
-                                  (dispatch! :create-upload
+                                  (dispatch [:create-upload
                                              {:url url
                                               :thread-id (thread :id)
-                                              :group-id (thread :group-id)}))))))]
+                                              :group-id (thread :group-id)}]))))))]
 
     (fn [thread]
       (let [{:keys [dragging? uploading?]} @state
@@ -155,11 +181,11 @@
             (let [sel (.getSelection js/window)
                   selection-size (- (.-anchorOffset sel) (.-focusOffset sel))]
               (when (zero? selection-size)
-                (dispatch! :focus-thread (thread :id)))))
+                (dispatch [:focus-thread (thread :id)]))))
 
           :on-blur
           (fn [e]
-            (dispatch! :mark-thread-read (thread :id)))
+            (dispatch [:mark-thread-read (thread :id)]))
 
           :on-key-down
           (fn [e]
@@ -168,7 +194,7 @@
                         (.-ctrlKey e))
                       (= KeyCodes.ESC (.-keyCode e)))
               (helpers/stop-event! e)
-              (dispatch! :hide-thread {:thread-id (thread :id)})))
+              (dispatch [:hide-thread {:thread-id (thread :id)}])))
 
           :on-paste
           (fn [e]
@@ -228,7 +254,7 @@
                               ; divs as controls, otherwise divs higher up also
                               ; get click events
                               (helpers/stop-event! e)
-                              (dispatch! :hide-thread {:thread-id (thread :id)}))}]
+                              (dispatch [:hide-thread {:thread-id (thread :id)}]))}]
                 [:div.control.unread
                  {:title "Mark Unread"
                   :on-click (fn [e]
@@ -236,7 +262,7 @@
                               ; divs as controls, otherwise divs higher up also
                               ; get click events
                               (helpers/stop-event! e)
-                              (dispatch! :reopen-thread (thread :id)))}])
+                              (dispatch [:reopen-thread (thread :id)]))}])
               [:div.control.permalink.hidden
                {:title "Get Permalink"
                 :on-click (fn [e]
@@ -249,8 +275,8 @@
                             ; divs as controls, otherwise divs higher up also
                             ; get click events
                             (helpers/stop-event! e)
-                            (dispatch! :unsub-thread
-                                       {:thread-id (thread :id)}))}]])
+                            (dispatch [:unsub-thread
+                                       {:thread-id (thread :id)}]))}]])
 
            [thread-tags-view thread]]
 
@@ -262,10 +288,12 @@
 
           [new-message-view {:thread-id (thread :id)
                              :group-id (thread :group-id)
-                             :new-thread? new?
                              :placeholder (if new?
                                             "Start a conversation..."
                                             "Reply...")
-                             :mentioned-user-ids (if new? (thread :mentioned-ids) ())
-                             :mentioned-tag-ids (if new? (thread :tag-ids) ())}]]]))))
+                             :new-message (thread :new-message)
+                             :mentioned-user-ids (when new?
+                                                   (thread :mentioned-ids))
+                             :mentioned-tag-ids (when new?
+                                                  (thread :tag-ids))}]]]))))
 

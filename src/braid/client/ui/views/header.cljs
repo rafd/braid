@@ -2,14 +2,23 @@
   (:require [reagent.ratom :refer-macros [reaction]]
             [braid.client.routes :as routes]
             [braid.client.helpers :refer [->color]]
-            [braid.client.state :refer [subscribe]]
+            [re-frame.core :refer [subscribe]]
             [braid.client.ui.views.search-bar :refer [search-bar-view]]
             [braid.client.quests.views :refer [quests-header-view quests-menu-view]]))
 
+(defn loading-indicator-view [group-id]
+  (let [page (subscribe [:page])]
+    (fn [group-id]
+      [:div.loading-indicator
+       {:class (cond
+                 (@page :loading?) "loading"
+                 (@page :error?) "error")
+        :style {:color (->color group-id)}}])))
+
 (defn current-user-button-view []
   (let [user-id (subscribe [:user-id])
-        user-avatar-url (subscribe [:user-avatar-url @user-id])
-        user-nickname (subscribe [:nickname @user-id])
+        user-avatar-url (subscribe [:user-avatar-url] [user-id])
+        user-nickname (subscribe [:nickname] [user-id])
         open-group-id (subscribe [:open-group-id])
         current-path (subscribe [:page-path])]
     (fn []
@@ -38,15 +47,50 @@
              :title title}
          body]))))
 
-(def group-headers
-  [{:title "Inbox"
-    :route-fn routes/inbox-page-path
-    :class "inbox"}
-   {:title "Recent"
-    :route-fn routes/recent-page-path
-    :class "recent"}])
+(defn group-header-buttons-view [header-items]
+  [:div.buttons
+   (doall
+     (for [header-item header-items]
+       ^{:key (header-item :title)}
+       [header-item-view header-item]))])
 
-(def user-headers
+(defn group-header-view []
+  (let [group-id (subscribe [:open-group-id])]
+    (fn []
+      [:div.group-header
+       [:div.bar {:style {:background-color (->color @group-id)}}
+        [group-name-view]
+        [group-header-buttons-view
+         [{:title "Inbox"
+           :route-fn routes/inbox-page-path
+           :class "inbox"}
+          {:title "Recent"
+           :route-fn routes/recent-page-path
+           :class "recent"}]]
+        [search-bar-view]]
+       [loading-indicator-view @group-id]])))
+
+(def admin-header-items
+  [{:class "group-bots"
+    :route-fn routes/bots-path
+    :body "Bots"}])
+
+(defn admin-header-view []
+  (let [user-id (subscribe [:user-id])
+        open-group-id (subscribe [:open-group-id])
+        admin? (subscribe [:current-user-is-group-admin?] [open-group-id])]
+    (fn []
+      (when @admin?
+        [:div.admin-header
+         [:div.admin-icon {:style {:color (->color @user-id)}}]
+         [:div.options
+          [:div.content
+           (doall
+             (for [header-item admin-header-items]
+               ^{:key (header-item :class)}
+               [header-item-view header-item]))]]]))))
+
+(def user-header-items
   [{:class "subscriptions"
     :route-fn routes/page-path
     :route-args {:page-id "tags"}
@@ -54,9 +98,6 @@
    {:class "invite-friend"
     :route-fn routes/invite-page-path
     :body "Invite a Person"}
-   {:class "group-bots"
-    :route-fn routes/bots-path
-    :body "Bots"}
    {:class "group-uploads"
     :route-fn routes/uploads-path
     :body "Uploads"}
@@ -72,28 +113,6 @@
     :route-fn routes/group-settings-path
     :body "Settings"}])
 
-(defn loading-indicator-view [group-id]
-  (let [page (subscribe [:page])]
-    (fn [group-id]
-      [:div.loading-indicator
-       {:class (cond
-                 (@page :loading?) "loading"
-                 (@page :error?) "error")
-        :style {:color (->color group-id)}}])))
-
-(defn group-header-view []
-  (let [group-id (subscribe [:open-group-id])]
-    (fn []
-      [:div.group-header
-       [:div.bar {:style {:background-color (->color @group-id)}}
-        [group-name-view]
-        (doall
-          (for [header group-headers]
-            ^{:key (header :title)}
-            [header-item-view header]))
-        [search-bar-view]]
-       [loading-indicator-view @group-id]])))
-
 (defn user-header-view []
   (let [user-id (subscribe [:user-id])]
     (fn []
@@ -104,13 +123,14 @@
        [:div.options
         [:div.content
          (doall
-           (for [header user-headers]
-             ^{:key (header :class)}
-             [header-item-view header]))]]])))
+           (for [header-item user-header-items]
+             ^{:key (header-item :class)}
+             [header-item-view header-item]))]]])))
 
 (defn header-view []
   [:div.header
    [group-header-view]
    [:div.spacer]
    [quests-header-view]
+   [admin-header-view]
    [user-header-view]])

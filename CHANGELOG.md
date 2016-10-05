@@ -1,3 +1,14 @@
+## 8 September 2016
+
+  - It is now possible to tag a thread using the mouse & clicking the "+" button on a thread
+  - Braid now uses Elasticsearch for full-text search if available
+
+## 21 August 2016
+
+  - Quests have been added! These are little "achievments" that can help people learn to use braid.  More to come soon!
+  - Fix bug that prevented admins from deleting tags
+  - Fix bug that prevented updates to tag descriptions from being persisted
+
 ## 2 August 2016
 
   - Fix bug that made thread "limbo" and "private" headers not go away

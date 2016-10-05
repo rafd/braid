@@ -1,8 +1,7 @@
 (ns braid.client.ui.views.pages.recent
   (:require [reagent.core :as r]
             [reagent.ratom :refer-macros [run!]]
-            [braid.client.state :refer [subscribe]]
-            [braid.client.dispatcher :refer [dispatch!]]
+            [re-frame.core :refer [subscribe]]
             [braid.client.ui.views.threads :refer [threads-view]]))
 
 (defn recent-page-view
@@ -22,8 +21,8 @@
                          :messages))
                  reverse)]
         [:div.page.recent
-         [:div.title "Recent"]
          (if (and (not (@page :loading?)) (empty? sorted-threads))
-           [:p "No recent threads in this group"]
+           [:div.content
+            [:p "No recent threads"]]
            [threads-view {:threads sorted-threads}])]))))
 

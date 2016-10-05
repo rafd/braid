@@ -1,19 +1,10 @@
 (ns braid.client.quests.handler
-  (:require [braid.client.quests.helpers :as helpers]))
+  (:require [re-frame.core :as rf]))
 
-(defn quests-handler [state [event args]]
-  (let [updated-quests
-        (->> (helpers/get-active-quests state)
-             (map (fn [quest]
-                    (let [inc-progress? ((quest :listener) state [event args])]
-                      (if inc-progress?
-                        (update quest :progress inc)
-                        quest))))
-             (map (fn [quest]
-                    [(quest :id) quest]))
-             (into {}))]
-
-    (update-in state [:quests]
-               (fn [quests]
-                 (merge quests
-                        updated-quests)))))
+(defn install-quests-handler! []
+  (rf/remove-post-event-callback :quest-handler)
+  (rf/add-post-event-callback
+    :quest-handler
+    (fn [event queue]
+      (when (not= "quests" (namespace (first event)))
+        (rf/dispatch [:quests/update-handler event])))))
